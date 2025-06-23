@@ -1,4 +1,4 @@
-package com.izk.portagoose.ui.theme
+package com.nikn.portagoose.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
