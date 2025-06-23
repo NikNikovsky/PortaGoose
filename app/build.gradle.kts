@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.izk.portagoose"
+    namespace = "com.nikn.portagoose"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.izk.portagoose"
+        applicationId = "com.nikn.portagoose"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

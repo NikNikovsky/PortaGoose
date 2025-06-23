@@ -1,4 +1,4 @@
-package com.izk.portagoose
+package com.nikn.portagoose
 
 import android.content.Intent
 import android.net.Uri
@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
                                 IconButton(onClick = {
                                     val aboutMessage = "This is a simple Android app to show if the Holy Goose has not moved.\n" +
                                             "Also available at https://goose.izkuipers.nl.\n" +
-                                            "Made by Nik Nikovsky, version 1" // Use the version string
+                                            "Made by Nik Nikovsky, version 1.1"
 
                                     AlertDialog.Builder(this@MainActivity)
                                         .setTitle("About")
