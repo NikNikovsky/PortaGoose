@@ -10,7 +10,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.nikn.com.nikn.portagoose"
+        applicationId = "com.nikn.portagoose"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
@@ -51,11 +51,10 @@ dependencies {
     testImplementation(libs.junit)
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.webkit:webkit:1.14.0")
-    // Corrected Material Design Components library for XML themes:
-    implementation("com.google.android.material:material:1.12.0") // Use the latest stable version for the XML Material Design library
+    implementation("com.google.android.material:material:1.12.0")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom)) // Keep for test
+    androidTestImplementation(platform(libs.androidx.compose.bom)) // Keep for testing.
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
