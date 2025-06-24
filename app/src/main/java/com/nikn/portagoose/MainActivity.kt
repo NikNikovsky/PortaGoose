@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
                                 IconButton(onClick = {
                                     val aboutMessage = "This is a simple Android app to show if the Holy Goose has not moved.\n" +
                                             "Also available at https://goose.izkuipers.nl.\n" +
-                                            "Made by Nik Nikovsky, version 1.1"
+                                            "Made by Nik Nikovsky, version 1.0.1"
 
                                     AlertDialog.Builder(this@MainActivity)
                                         .setTitle("About")
