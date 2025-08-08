@@ -17,21 +17,17 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -42,11 +38,13 @@ import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.core.graphics.createBitmap
+
 
 class MainActivity : ComponentActivity() {
 
     private var currentScreen by mutableStateOf("feed") // "feed", "how", etc.
-    private var reloadTrigger by mutableStateOf(0)
+    private var reloadTrigger by mutableIntStateOf(0)
 
     // Store WebView and Context for permission callback
     private var webViewForScreenshot: WebView? = null
@@ -218,7 +216,7 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        val bitmap = Bitmap.createBitmap(webViewToCapture.width, webViewToCapture.height, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(webViewToCapture.width, webViewToCapture.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         webViewToCapture.draw(canvas) // Draw the WebView's content onto the bitmap
 
@@ -342,7 +340,7 @@ fun FeedWebView(
                         if(view != null) webViewInstance = view
                     }
                 }
-                settings.javaScriptEnabled = true
+                settings.javaScriptEnabled = false
                 settings.domStorageEnabled = true
                 settings.useWideViewPort = true
                 settings.loadWithOverviewMode = true
