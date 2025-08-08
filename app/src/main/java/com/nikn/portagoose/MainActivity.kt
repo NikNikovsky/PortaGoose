@@ -21,7 +21,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -29,136 +28,67 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key // Import the key composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.nikn.portagoose.ui.theme.PortaGooseTheme
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
 
+    private var currentScreen by mutableStateOf("feed") // "feed", "how", etc.
+    private var reloadTrigger by mutableStateOf(0)
+
+    // Store WebView and Context for permission callback
     private var webViewForScreenshot: WebView? = null
     private var contextForScreenshot: Context? = null
-    private var onScreenshotPermissionGrantedCallback: (() -> Unit)? = null
 
+    private val requestStoragePermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+            if (isGranted) {
+                Log.d("PortaGooseApp", "Storage permission granted after request.")
+                webViewForScreenshot?.let { wv ->
+                    contextForScreenshot?.let { ctx ->
+                        takeScreenshotInternal(wv, ctx)
+                    }
+                }
+            } else {
+                Log.d("PortaGooseApp", "Storage permission denied after request.")
+                Toast.makeText(this, "Storage permission denied. Cannot save screenshot.", Toast.LENGTH_LONG).show()
+            }
+            // Clear stored references
+            webViewForScreenshot = null
+            contextForScreenshot = null
+        }
+
+    // Handler to be passed to FeedWebView
+    private val handleScreenshotRequest: (WebView, Context) -> Unit = { webView, context ->
+        Log.d("PortaGooseApp", "Screenshot request received by MainActivity.")
+        takeScreenshotIfNeeded(webView, context)
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             PortaGooseTheme {
-                var currentScreen by remember { mutableStateOf("feed") }
-                // webViewUrl is now primarily controlled by currentScreen,
-                // but kept for potential direct URL manipulations if ever needed.
-                var webViewUrl by remember { mutableStateOf("https://goose.izkuipers.nl/feed") }
-                var reloadTrigger by remember { mutableStateOf(0) }
-
-                val requestPermissionLauncher =
-                    rememberLauncherForActivityResult(
-                        ActivityResultContracts.RequestPermission()
-                    ) { isGranted: Boolean ->
-                        if (isGranted) {
-                            Log.d("PortaGooseApp", "WRITE_EXTERNAL_STORAGE permission granted.")
-                            onScreenshotPermissionGrantedCallback?.invoke()
-                        } else {
-                            Log.d("PortaGooseApp", "WRITE_EXTERNAL_STORAGE permission denied.")
-                            Toast.makeText(this, "Storage Permission Denied. Cannot save screenshot.", Toast.LENGTH_LONG).show()
-                        }
-                    }
-
-                val handleScreenshotRequest: (WebView, Context) -> Unit = { webviewInstance, ctx ->
-                    Log.d("PortaGooseApp", "handleScreenshotRequest called.")
-                    this.webViewForScreenshot = webviewInstance
-                    this.contextForScreenshot = ctx
-                    this.onScreenshotPermissionGrantedCallback = {
-                        this.webViewForScreenshot?.let { wv ->
-                            this.contextForScreenshot?.let { c ->
-                                if (wv.width > 0 && wv.height > 0) {
-                                    Log.d("PortaGooseApp", "Permission granted or not needed, proceeding with screenshot.")
-                                    takeScreenshot(wv, c)
-                                } else {
-                                    Log.w("PortaGooseApp", "Screenshot aborted: View not ready (width/height is 0).")
-                                    Toast.makeText(c, "Cannot take screenshot: WebView not fully loaded.", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    }
-
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                        when {
-                            ContextCompat.checkSelfPermission(
-                                ctx,
-                                Manifest.permission.WRITE_EXTERNAL_STORAGE
-                            ) == PackageManager.PERMISSION_GRANTED -> {
-                                Log.d("PortaGooseApp", "Storage permission already granted for API < 29.")
-                                onScreenshotPermissionGrantedCallback?.invoke()
-                            }
-                            shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE) -> {
-                                Log.d("PortaGooseApp", "Showing rationale for storage permission.")
-                                // In a real app, show a proper dialog explaining why you need the permission.
-                                AlertDialog.Builder(this)
-                                    .setTitle("Permission Needed")
-                                    .setMessage("This app needs storage access to save screenshots. Please grant the permission.")
-                                    .setPositiveButton("OK") { _, _ ->
-                                        requestPermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                                    }
-                                    .setNegativeButton("Cancel") { dialog, _ ->
-                                        dialog.dismiss()
-                                        Toast.makeText(ctx, "Permission denied. Cannot save screenshot.", Toast.LENGTH_SHORT).show()
-                                    }
-                                    .show()
-                            }
-                            else -> {
-                                Log.d("PortaGooseApp", "Requesting storage permission for API < 29.")
-                                requestPermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                            }
-                        }
-                    } else {
-                        Log.d("PortaGooseApp", "Android 10+ (API 29+), MediaStore will be used. No direct WRITE_EXTERNAL_STORAGE needed for Pictures dir.")
-                        onScreenshotPermissionGrantedCallback?.invoke()
-                    }
-                }
-
                 Scaffold(
                     topBar = {
                         TopAppBar(
-                            title = {
-                                Text(
-                                    when (currentScreen) {
-                                        "feed" -> "PortaGoose"
-                                        "how" -> "How it Works"
-                                        else -> "PortaGoose"
-                                    }
-                                )
-                            },
+                            title = { Text(if (currentScreen == "feed") "PortaGoose" else "How the Holy Goose Works") },
                             navigationIcon = {
-                                if (currentScreen == "how") {
+                                if (currentScreen != "feed") {
                                     IconButton(onClick = {
                                         currentScreen = "feed"
-                                        // webViewUrl = "https://goose.izkuipers.nl/feed" // Update if needed
-                                        reloadTrigger = 0 // Resetting trigger
                                         Log.d("PortaGooseApp", "Navigated back to feed.")
                                     }) {
                                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -176,13 +106,12 @@ class MainActivity : ComponentActivity() {
                                 }
                                 IconButton(onClick = {
                                     currentScreen = "how"
-                                    // webViewUrl = "https://goose.izkuipers.nl/how" // Update if needed
                                     Log.d("PortaGooseApp", "Navigated to how.")
                                 }) { Text("How?") }
                                 IconButton(onClick = {
                                     val aboutMessage = "This is a simple Android app to show if the Holy Goose has not moved.\n" +
                                             "Also available at https://goose.izkuipers.nl.\n" +
-                                            "Made by Nik Nikovsky, version 1.0.3" // Updated version
+                                            "Made by Nik Nikovsky, version 1.0.2" // Updated version
                                     AlertDialog.Builder(this@MainActivity)
                                         .setTitle("About")
                                         .setMessage(aboutMessage)
@@ -209,19 +138,15 @@ class MainActivity : ComponentActivity() {
                         val urlForWebView = when (currentScreen) {
                             "feed" -> "https://goose.izkuipers.nl/feed"
                             "how" -> "https://goose.izkuipers.nl/how"
-                            else -> "https://goose.izkuipers.nl/feed" // Default
+                            else -> "https://goose.izkuipers.nl/feed"
                         }
-                        // The key helps ensure that if the fundamental URL changes (feed vs how),
-                        // or if reloadTrigger changes for the feed, it's treated as a distinct instance by Compose
-                        // for state within AndroidView if necessary (like webViewInstance).
                         val webViewKey = urlForWebView + if (currentScreen == "feed") "_rt$reloadTrigger" else ""
 
-
-                        key(webViewKey) { // Use key Composable to wrap AndroidView for forced re-creation/update
+                        key(webViewKey) {
                             FeedWebView(
                                 url = urlForWebView,
                                 reloadTrigger = if (currentScreen == "feed") reloadTrigger else 0,
-                                onLongPressScreenshot = handleScreenshotRequest
+                                onLongPressScreenshot = handleScreenshotRequest // Pass the updated handler
                             )
                         }
                     }
@@ -230,196 +155,218 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun takeScreenshot(view: WebView, context: Context) {
-        Log.d("PortaGooseApp", "takeScreenshot: View width=${view.width}, height=${view.height}")
+    private fun takeScreenshotIfNeeded(view: WebView, context: Context) {
+        Log.d("PortaGooseApp", "takeScreenshotIfNeeded: View width=${view.width}, height=${view.height}")
         if (view.width <= 0 || view.height <= 0) {
             Toast.makeText(context, "View is not ready for screenshot.", Toast.LENGTH_SHORT).show()
-            Log.e("PortaGooseApp", "takeScreenshot: View not ready (width or height is 0).")
+            Log.e("PortaGooseApp", "takeScreenshotIfNeeded: View not ready (width or height is 0).")
             return
         }
 
-        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        // For pre-Q devices, check and request permission if needed.
+        // For Q+, MediaStore is used and doesn't need this explicit permission for own writes.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            when {
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED -> {
+                    Log.d("PortaGooseApp", "Storage permission already granted for pre-Q device.")
+                    takeScreenshotInternal(view, context) // Pass the WebView directly
+                }
+                shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE) -> {
+                    Log.d("PortaGooseApp", "Showing rationale for storage permission (pre-Q).")
+                    this.webViewForScreenshot = view // Store for callback
+                    this.contextForScreenshot = context
+                    AlertDialog.Builder(this) // Use Activity context for Dialog
+                        .setTitle("Permission Needed")
+                        .setMessage("This app needs storage access to save screenshots on older Android versions. Please grant the permission.")
+                        .setPositiveButton("OK") { _, _ ->
+                            requestStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        }
+                        .setNegativeButton("Cancel") { dialog, _ ->
+                            dialog.dismiss()
+                            Toast.makeText(context, "Permission denied. Cannot save screenshot.", Toast.LENGTH_SHORT).show()
+                            this.webViewForScreenshot = null // Clear on cancel
+                            this.contextForScreenshot = null
+                        }
+                        .show()
+                }
+                else -> {
+                    Log.d("PortaGooseApp", "Requesting storage permission (pre-Q).")
+                    this.webViewForScreenshot = view // Store for callback
+                    this.contextForScreenshot = context
+                    requestStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
+        } else {
+            // On Android Q and above, proceed directly with MediaStore
+            Log.d("PortaGooseApp", "Android Q+ detected, proceeding with MediaStore.")
+            takeScreenshotInternal(view, context) // Pass the WebView directly
+        }
+    }
+
+    // Renamed to avoid confusion, this is the core saving logic
+    // Now takes the specific WebView to capture
+    private fun takeScreenshotInternal(webViewToCapture: WebView, context: Context) {
+        Log.d("PortaGooseApp", "takeScreenshotInternal: Capturing bitmap from WebView.")
+
+        // Ensure the WebView has valid dimensions
+        if (webViewToCapture.width <= 0 || webViewToCapture.height <= 0) {
+            Log.e("PortaGooseApp", "takeScreenshotInternal: WebView has invalid dimensions (${webViewToCapture.width}x${webViewToCapture.height}). Cannot capture.")
+            Toast.makeText(context, "Error: WebView not ready for capture.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val bitmap = Bitmap.createBitmap(webViewToCapture.width, webViewToCapture.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        view.draw(canvas)
+        webViewToCapture.draw(canvas) // Draw the WebView's content onto the bitmap
 
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val fileName = "PortaGoose_Screenshot_$timestamp.png"
-        Log.d("PortaGooseApp", "takeScreenshot: Attempting to save $fileName")
+        Log.d("PortaGooseApp", "takeScreenshotInternal: Attempting to save $fileName")
 
-        var fos: FileOutputStream? = null
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Use MediaStore for Android Q (API 29) and above
                 val resolver = context.contentResolver
+                val relativePath = Environment.DIRECTORY_PICTURES + File.separator + "PortaGoose"
+                Log.d("PortaGooseApp", "takeScreenshotInternal (API Q+): Saving to relative path: $relativePath")
+
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + File.separator + "PortaGoose")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                    if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
                 }
-                val imageUri: Uri? = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                if (imageUri == null) {
-                    Log.e("PortaGooseApp", "takeScreenshot: MediaStore failed to insert image for API ${Build.VERSION.SDK_INT}.")
-                    Toast.makeText(context, "Error saving screenshot: MediaStore URI was null.", Toast.LENGTH_LONG).show()
-                    return
-                }
-                fos =
-                    resolver.openOutputStream(imageUri) as FileOutputStream? // No need to cast if signature is correct
-                Log.d("PortaGooseApp", "takeScreenshot: Using MediaStore for API ${Build.VERSION.SDK_INT}. URI: $imageUri")
-            } else {
-                val imagesDirFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "PortaGoose")
-                if (!imagesDirFile.exists() && !imagesDirFile.mkdirs()) {
-                    Log.e("PortaGooseApp", "takeScreenshot: Failed to create directory ${imagesDirFile.absolutePath} for API ${Build.VERSION.SDK_INT}.")
-                    Toast.makeText(context, "Error saving screenshot: Could not create directory.", Toast.LENGTH_LONG).show()
-                    return
-                }
-                val imageFile = File(imagesDirFile, fileName)
-                fos = FileOutputStream(imageFile)
-                Log.d("PortaGooseApp", "takeScreenshot: Using legacy storage for API ${Build.VERSION.SDK_INT}. Path: ${imageFile.absolutePath}")
-            }
+                var imageUri: Uri? = null
+                try {
+                    imageUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                    if (imageUri == null) {
+                        Log.e("PortaGooseApp", "takeScreenshotInternal (API Q+): MediaStore insert failed, imageUri is null.")
+                        Toast.makeText(context, "Error saving: MediaStore URI null.", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    Log.d("PortaGooseApp", "takeScreenshotInternal (API Q+): MediaStore insert successful. URI: $imageUri")
 
-            fos?.use { outputStream -> // fos can be null if resolver.openOutputStream(imageUri) returns null
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
-                Toast.makeText(context, "Screenshot saved to Pictures/PortaGoose", Toast.LENGTH_LONG).show()
-                Log.i("PortaGooseApp", "takeScreenshot: Screenshot saved successfully as $fileName.")
-            } ?: run {
-                Log.e("PortaGooseApp", "takeScreenshot: FileOutputStream was null before compress. Image URI might have been invalid or unopenable.")
-                Toast.makeText(context, "Error saving screenshot: Output stream is null.", Toast.LENGTH_LONG).show()
+                    resolver.openOutputStream(imageUri).use { outputStream: OutputStream? ->
+                        if (outputStream == null) {
+                            Log.e("PortaGooseApp", "takeScreenshotInternal (API Q+): resolver.openOutputStream(imageUri) returned null.")
+                            Toast.makeText(context, "Error saving: Output stream null.", Toast.LENGTH_LONG).show()
+                            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+                                contentValues.clear()
+                                contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+                                try { resolver.update(imageUri, contentValues, null, null) }
+                                catch (e: Exception) { Log.e("PortaGooseApp", "Error clearing IS_PENDING on failed stream: $imageUri", e)}
+                            }
+                            return
+                        }
+                        Log.d("PortaGooseApp", "takeScreenshotInternal (API Q+): Successfully opened output stream.")
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+                        outputStream.flush()
+                        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+                            contentValues.clear()
+                            contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+                            resolver.update(imageUri, contentValues, null, null)
+                            Log.d("PortaGooseApp", "takeScreenshotInternal (API Q): Cleared IS_PENDING for $imageUri")
+                        }
+                        Toast.makeText(context, "Screenshot saved to Pictures/PortaGoose", Toast.LENGTH_LONG).show()
+                        Log.i("PortaGooseApp", "takeScreenshotInternal (API Q+): Screenshot saved as $fileName to $imageUri")
+                    }
+                } catch (e: Exception) {
+                    Log.e("PortaGooseApp", "takeScreenshotInternal (API Q+): Error during MediaStore operation for URI '$imageUri'.", e)
+                    Toast.makeText(context, "Error saving screenshot: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                    if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q && imageUri != null) {
+                        contentValues.clear()
+                        contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        try { resolver.update(imageUri, contentValues, null, null) }
+                        catch (updateEx: Exception) { Log.e("PortaGooseApp", "Error clearing IS_PENDING on exception: $imageUri", updateEx)}
+                    }
+                }
+            } else {
+                // Use legacy file paths for pre-Q devices (Android versions below 10 / API 29)
+                Log.d("PortaGooseApp", "takeScreenshotInternal (pre-API Q): Using legacy storage.")
+                val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                val appDir = File(picturesDir, "PortaGoose")
+                if (!appDir.exists() && !appDir.mkdirs()) {
+                    Log.e("PortaGooseApp", "takeScreenshotInternal (pre-API Q): Failed to create directory ${appDir.absolutePath}.")
+                    Toast.makeText(context, "Error saving: Could not create directory.", Toast.LENGTH_LONG).show()
+                    return
+                }
+                val imageFile = File(appDir, fileName)
+                FileOutputStream(imageFile).use { fos ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                    fos.flush()
+                    Toast.makeText(context, "Screenshot saved to Pictures/PortaGoose", Toast.LENGTH_LONG).show()
+                    Log.i("PortaGooseApp", "takeScreenshotInternal (pre-API Q): Screenshot saved as $fileName to ${imageFile.absolutePath}")
+                }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
-            Log.e("PortaGooseApp", "takeScreenshot: Error saving screenshot.", e)
-            Toast.makeText(context, "Error saving screenshot: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            Log.e("PortaGooseApp", "takeScreenshotInternal: General error saving screenshot.", e)
+            Toast.makeText(context, "Failed to save screenshot: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        } finally {
+            // Optional: Recycle bitmap if no longer needed
+            // if (!bitmap.isRecycled) {
+            //     bitmap.recycle()
+            // }
         }
     }
 }
 
 @Composable
 fun FeedWebView(
-    url: String, // Current base URL to load
-    reloadTrigger: Int, // Changed only for the feed screen to trigger reloads
-    onLongPressScreenshot: (WebView, Context) -> Unit
+    url: String,
+    reloadTrigger: Int,
+    onLongPressScreenshot: (webView: WebView, context: Context) -> Unit
 ) {
     val context = LocalContext.current
-    // This webViewInstance is useful for the screenshot functionality.
-    // It will be updated in the factory and update blocks.
     var webViewInstance: WebView? by remember { mutableStateOf(null) }
 
-    // Use SideEffect for logging recompositions/updates to this specific composable
-    SideEffect {
-        Log.d("PortaGooseApp", "FeedWebView recomposed/updated: url='$url', reloadTrigger=$reloadTrigger")
-    }
-
     AndroidView(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(url, reloadTrigger) { // Re-trigger pointerInput if URL or reloadTrigger changes
-                detectTapGestures(
-                    onLongPress = {
-                        Log.d("PortaGooseApp", "onLongPress detected for URL: $url")
-                        webViewInstance?.let { webview ->
-                            // Check width/height again here as it's closer to the user action
-                            if (webview.width > 0 && webview.height > 0) {
-                                onLongPressScreenshot(webview, context)
-                            } else {
-                                Log.w("PortaGooseApp", "onLongPress: WebView not ready for screenshot (width/height is 0). URL: $url")
-                                Toast.makeText(context, "Cannot take screenshot: WebView not fully rendered.", Toast.LENGTH_SHORT).show()
-                            }
-                        } ?: run {
-                            Log.w("PortaGooseApp", "onLongPress: webViewInstance is null. URL: $url")
-                            Toast.makeText(context, "WebView not available for screenshot.", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                )
-            },
         factory = { ctx ->
-            Log.d("PortaGooseApp", "FeedWebView Factory: Creating WebView for URL: $url")
             WebView(ctx).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
                 webViewClient = object : WebViewClient() {
-                    override fun onPageStarted(view: WebView?, webViewUrl: String?, favicon: Bitmap?) {
-                        super.onPageStarted(view, webViewUrl, favicon)
-                        Log.d("PortaGooseApp", "WebView onPageStarted: $webViewUrl")
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        Log.d("PortaGooseApp", "WebView page loading started: $url")
                     }
-
-                    override fun onPageFinished(view: WebView?, webViewUrl: String?) {
-                        super.onPageFinished(view, webViewUrl)
-                        Log.d("PortaGooseApp", "WebView onPageFinished: $webViewUrl. WebView actual dimensions: ${view?.width}x${view?.height}")
-                    }
-
-                    override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) {
-                        super.onReceivedError(view, errorCode, description, failingUrl)
-                        Log.e("PortaGooseApp", "WebView Error: $errorCode, $description, URL: $failingUrl")
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        Log.d("PortaGooseApp", "WebView page loading finished: $url")
+                        if(view != null) webViewInstance = view
                     }
                 }
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
-                settings.loadWithOverviewMode = true
                 settings.useWideViewPort = true
-                settings.builtInZoomControls = true
-                settings.displayZoomControls = false // Hides the +/- zoom buttons
+                settings.loadWithOverviewMode = true
 
-                // Determine initial URL to load
-                val initialUrlToLoad = if (url.contains("feed") && reloadTrigger > 0) {
-                    val separator = if (url.contains("?")) "&" else "?"
-                    "$url${separator}_rel=$reloadTrigger"
-                } else {
-                    url
+                setOnLongClickListener {
+                    Log.d("PortaGooseApp", "WebView long press detected.")
+                    webViewInstance?.let { wv ->
+                        onLongPressScreenshot(wv, context)
+                    }
+                    true
                 }
-                Log.d("PortaGooseApp", "FeedWebView Factory: Initial load URL: $initialUrlToLoad")
-                loadUrl(initialUrlToLoad)
-                webViewInstance = this // Assign instance here
+                Log.d("PortaGooseApp", "WebView created. Initial URL: $url, Reload trigger: $reloadTrigger (at creation)")
+                loadUrl(url)
             }
         },
         update = { webView ->
-            webViewInstance = webView // Keep instance updated
-            Log.d("PortaGooseApp", "FeedWebView Update: current WebView URL='${webView.url}', target prop URL='$url', reloadTrigger=$reloadTrigger")
-
-            val baseFeedUrl = "https://goose.izkuipers.nl/feed" // Define for clarity
-            var urlToLoad = url // Default to the URL prop
-
-            if (url == baseFeedUrl && reloadTrigger > 0) {
-                // If it's the feed screen and a reload is triggered, construct the unique URL
-                val separator = if (baseFeedUrl.contains("?")) "&" else "?"
-                urlToLoad = "$baseFeedUrl${separator}_rel=$reloadTrigger"
-                Log.d("PortaGooseApp", "FeedWebView Update: Reload triggered for feed. New urlToLoad: $urlToLoad")
+            Log.d("PortaGooseApp", "WebView update called. Current URL: ${webView.url}, New URL: $url, Reload trigger: $reloadTrigger")
+            if (webView.url != url) {
+                webView.loadUrl(url)
             }
-
-            // Only load if the newly determined urlToLoad is different from what WebView is currently showing
-            if (webView.url != urlToLoad) {
-                Log.d("PortaGooseApp", "FeedWebView Update: Loading new URL: $urlToLoad (current: ${webView.url})")
-                webView.loadUrl(urlToLoad)
-            } else {
-                Log.d("PortaGooseApp", "FeedWebView Update: No URL change needed. Current: ${webView.url}, Target: $urlToLoad")
-            }
-        }
+            webViewInstance = webView
+        },
+        modifier = Modifier
+            .fillMaxSize()
+        // Removed the pointerInput variant as setOnLongClickListener on WebView is more direct.
     )
 }
-
-@Preview(showBackground = true, device = "spec:orientation=landscape,width=1280dp,height=800dp") // Example landscape preview
-@Composable
-fun DefaultPreview() {
-    PortaGooseTheme {
-        // Simulate MainActivity's structure for preview
-        var currentScreen by remember { mutableStateOf("feed") }
-        var reloadTrigger by remember { mutableStateOf(0) }
-        val urlForWebView = when (currentScreen) {
-            "feed" -> "https://goose.izkuipers.nl/feed"
-            "how" -> "https://goose.izkuipers.nl/how"
-            else -> "https://goose.izkuipers.nl/feed"
-        }
-        val webViewKey = urlForWebView + if (currentScreen == "feed") "_rt$reloadTrigger" else ""
-
-        key(webViewKey) {
-            FeedWebView(
-                url = urlForWebView,
-                reloadTrigger = if (currentScreen == "feed") reloadTrigger else 0,
-                onLongPressScreenshot = { wv, ctx -> Log.d("Preview", "Screenshot requested in preview") }
-            )
-        }
-        // To make preview interactive, you'd need more complex state hoisting or a mini-scaffold.
-        // For now, this just shows the initial state of FeedWebView.
-    }
-}
-

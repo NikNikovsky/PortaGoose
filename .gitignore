@@ -16,3 +16,4 @@ local.properties
 /app/release
 /.idea/
 /.kotlin/
+/app/src/main/testlog.txt
